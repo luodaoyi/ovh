@@ -2,7 +2,10 @@
 
 > 🌐 [English](README.en.md) | 中文
 
-> 本仓库是 [gokele/ovh](https://github.com/gokele/ovh) 的社区维护分支，与 OVHcloud 官方无关。原仓库已归档；本仓保留原作者历史和 [AGPL-3.0 许可证](LICENSE)。接手范围见[维护说明](docs/MAINTENANCE.md)。
+## 原作者与贡献
+
+- **原作者：[可乐（gokele）](https://github.com/gokele)**，原项目：[gokele/ovh](https://github.com/gokele/ovh)（已归档）。现有项目的主体设计和功能来自可乐与上游贡献者，感谢他们的开发和维护。原有贡献记录仍可在本仓库的 [Git 历史](https://github.com/luodaoyi/ovh/commits/025ac9629db0f50dae3133175fa8b6107564ecb3/)中查看。
+- **接手维护：[luodaoyi/ovh](https://github.com/luodaoyi/ovh)**。本仓只负责后续维护、更新与发布，不改变原作者归属；保留原作者历史与 [AGPL-3.0 许可证](LICENSE)。这是社区项目，与 OVHcloud 官方无关。见[维护说明](docs/MAINTENANCE.md)。
 
 OVH 独立服务器 / VPS / Eco 系列**抢购 + 监控 + 管理**控制台。
 

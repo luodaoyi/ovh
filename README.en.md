@@ -2,7 +2,10 @@
 
 > 🌐 English | [中文](README.md)
 
-> This repository is a community-maintained fork of [gokele/ovh](https://github.com/gokele/ovh), not an official OVHcloud project. The original repository is archived. We retain its author history and [AGPL-3.0 license](LICENSE). See the [maintenance notes](docs/MAINTENANCE.md).
+## Original author and contributors
+
+- **Original author: [Cola (可乐 / gokele)](https://github.com/gokele)**. The original project is [gokele/ovh](https://github.com/gokele/ovh), now archived. Cola and the upstream contributors built and maintained the original design and features. Their work remains in the [Git history](https://github.com/luodaoyi/ovh/commits/025ac9629db0f50dae3133175fa8b6107564ecb3/).
+- **Ongoing maintenance: [luodaoyi/ovh](https://github.com/luodaoyi/ovh)**. This fork takes responsibility for future maintenance, updates, and releases without changing authorship. It preserves the original history and [AGPL-3.0 license](LICENSE). It is a community project, not affiliated with OVHcloud. See the [maintenance notes](docs/MAINTENANCE.md).
 
 A **sniping + monitoring + management** console for OVH bare-metal servers / VPS / Eco lines.
 

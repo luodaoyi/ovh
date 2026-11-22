@@ -192,6 +192,7 @@ jobs:
           {
             if [[ "$VERSION" == 0.4.38 ]]; then
               printf '%s\n\n' '## First stable release of the luodaoyi/ovh fork' \
+                'Original author: [Cola (可乐 / gokele)](https://github.com/gokele), with the contributors to [gokele/ovh](https://github.com/gokele/ovh). This fork continues maintenance and preserves their work and the AGPL-3.0 license.' \
                 'The application checks this fork for updates. Install this release manually when moving from an upstream build; its updater will not automatically switch to this fork.'
             fi
             printf '%s\n' '## Downloads' \
