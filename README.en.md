@@ -1,5 +1,12 @@
 # OVH Console
 
+> [!WARNING]
+> **Only use this project if you are willing to accept the risks. If you are concerned, do not install it, run it, or give it credentials.**
+>
+> - **Account and charges:** This third-party project is not endorsed or supported by OVHcloud. Automated monitoring or ordering may trigger OVHcloud controls and lead to restrictions, suspension, or termination of your account or API access. Automatic orders may incur charges. Review the OVHcloud services and API terms that apply in your region before use.
+> - **Credentials and data:** Vulnerabilities, misconfiguration, or accidental sharing may expose API keys, account information, notification tokens, logs, or database backups. Grant only the required permissions, do not expose the console directly to the internet, and do not upload real keys, full logs, or backups.
+> - **Responsibility:** This software is provided as is and makes no guarantees about account security, data security, or availability. Assess the risks yourself. Warranty disclaimers and liability limitations are governed by [AGPL-3.0 sections 15 and 16](LICENSE) and applicable law.
+
 > 🌐 English | [中文](README.md)
 
 ## Original author and contributors
