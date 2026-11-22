@@ -1,0 +1,228 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Stable VERSION (example 0.4.38, without v)'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: github.repository == 'luodaoyi/ovh' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      tag: ${{ steps.gate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: gate
+        name: Require tested default-branch commit and unused stable version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$REQUESTED_VERSION" == "$version" ]]
+          tag="v$version"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" == main ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$GITHUB_SHA" ]]
+          refs="$(git ls-remote --tags origin "refs/tags/$tag")"
+          [[ -z "$refs" ]]
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" | jq -cs 'add // []')"
+          jq -e --arg tag "$tag" 'all(.[]; .tag_name != $tag)' <<< "$releases"
+          previous="$(jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name | select(test("^v[0-9]+[.][0-9]+[.][0-9]+$")) | ltrimstr("v")' <<< "$releases")"
+          if [[ -n "$previous" ]]; then
+            [[ "$(printf '%s\n' "$previous" "$version" | sort -V | tail -n 1)" == "$version" ]]
+          fi
+          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$GITHUB_SHA" -f branch=main -f event=push -f per_page=10 |
+            jq -e --arg sha "$GITHUB_SHA" '.workflow_runs[0] | .head_sha == $sha and .status == "completed" and .conclusion == "success"'
+          printf 'version=%s\ntag=%s\n' "$version" "$tag" >> "$GITHUB_OUTPUT"
+
+  binaries:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: web
+      - run: bash .github/scripts/build-release.sh "$RUNNER_TEMP/ovh-binaries"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-binaries
+          path: ${{ runner.temp }}/ovh-binaries/
+          if-no-files-found: error
+
+  image:
+    needs: [gate, binaries]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/luodaoyi/ovh
+      VERSION: ${{ needs.gate.outputs.version }}
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      anonymous-pull: ${{ steps.anonymous.outputs.status }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Confirm the tested commit is still main before pushing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify published image digest and both platforms
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect="$(docker buildx imagetools inspect "$IMAGE:$VERSION")"
+          [[ "$(awk '/^Digest:/ {print $2; exit}' <<< "$inspect")" == "$DIGEST" ]]
+          docker buildx imagetools inspect --raw "$IMAGE@$DIGEST" |
+            jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64", "arm64"]'
+      - id: anonymous
+        name: Check whether the image is also readable without credentials
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          status=unverified
+          if token="$(curl -fsS --max-time 15 'https://ghcr.io/token?service=ghcr.io&scope=repository:luodaoyi/ovh:pull' | jq -er .token)" &&
+             headers="$(curl -fsSI --max-time 15 -H "Authorization: Bearer $token" \
+               -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json' \
+               "https://ghcr.io/v2/luodaoyi/ovh/manifests/$VERSION")" &&
+             [[ "$(tr -d '\r' <<< "$headers" | awk 'tolower($1) == "docker-content-digest:" {print $2; exit}')" == "$DIGEST" ]]; then
+            status=verified
+          fi
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: [gate, binaries, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.gate.outputs.tag }}
+      VERSION: ${{ needs.gate.outputs.version }}
+      IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+      ANONYMOUS_PULL: ${{ needs.image.outputs.anonymous-pull }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-binaries
+          path: dist
+      - name: Verify release bundle before accessing write token
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          sha256sum --strict --check checksums.txt
+          diff <(printf '%s\n' checksums.txt ovh-server-linux-amd64 ovh-server-linux-arm64 ovh-server-windows-amd64.exe) \
+            <(find . -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+      - name: Stage and publish stable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$GITHUB_SHA" ]]
+          git_refs="$(git ls-remote --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/$TAG")"
+          [[ -z "$git_refs" ]]
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            jq -es --arg tag "$TAG" 'all(.[][]; .tag_name != $tag)'
+          notes="$RUNNER_TEMP/release-notes.md"
+          {
+            if [[ "$VERSION" == 0.4.38 ]]; then
+              printf '%s\n\n' '## First stable release of the luodaoyi/ovh fork' \
+                'The application checks this fork for updates. Install this release manually when moving from an upstream build; its updater will not automatically switch to this fork.'
+            fi
+            printf '%s\n' '## Downloads' \
+              'Standalone binaries with bundled web UI are available for Linux amd64/arm64 and Windows amd64. Verify each download against `checksums.txt`.'
+            printf '\nContainer: `ghcr.io/luodaoyi/ovh:%s` (`%s`), linux/amd64 and linux/arm64.\n' "$VERSION" "$IMAGE_DIGEST"
+            if [[ "$ANONYMOUS_PULL" != verified ]]; then
+              printf '%s\n' 'Anonymous registry access was not verified; an authorized GHCR login may be required.'
+            fi
+            printf '\n%s\n' 'Back up the existing data directory and encryption configuration before migrating. Publication does not deploy or change an existing installation.'
+          } > "$notes"
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+            --draft --target "$GITHUB_SHA" --title "$TAG" --notes-file "$notes"
+          release_id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            jq -ers --arg tag "$TAG" '[.[][] | select(.tag_name == $tag and .draft)] | if length == 1 then .[0].id else error("unique draft not found") end')"
+          [[ "$release_id" =~ ^[0-9]+$ ]]
+          remote="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
+          jq -e --arg tag "$TAG" --arg sha "$GITHUB_SHA" '.draft and (.prerelease | not) and .tag_name == $tag and .target_commitish == $sha and ([.assets[] | select(.state == "uploaded" and .size > 0) | .name] | sort) == ["checksums.txt","ovh-server-linux-amd64","ovh-server-linux-arm64","ovh-server-windows-amd64.exe"]' <<< "$remote"
+          for path in dist/*; do
+            hash="$(sha256sum "$path" | cut -d ' ' -f 1)"
+            jq -e --arg name "${path##*/}" --arg digest "sha256:$hash" 'any(.assets[]; .name == $name and .digest == $digest)' <<< "$remote"
+          done
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$GITHUB_SHA" ]]
+          # Some draft paths create the ref; never adopt a different commit.
+          git_refs="$(git ls-remote --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/$TAG")"
+          if [[ -z "$git_refs" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" |
+            jq -e --arg sha "$GITHUB_SHA" '.object.type == "commit" and .object.sha == $sha'
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -F draft=false -f make_latest=true --silent
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" |
+            jq -e --arg tag "$TAG" '.tag_name == $tag and (.draft | not) and (.prerelease | not) and (.assets | length == 4)'

@@ -16,7 +16,7 @@ OVH 独立服务器 / VPS / Eco 系列**抢购 + 监控 + 管理**控制台。
 
 ## 下载
 
-本维护分支暂未提供经验证的二进制或容器镜像。后续本仓产物仅以 [luodaoyi/ovh Releases](https://github.com/luodaoyi/ovh/releases) 和相应版本说明为准。不要把旧上游产物当成本仓发布，也不要直接用旧更新入口迁移已有实例。
+从 [luodaoyi/ovh Releases](https://github.com/luodaoyi/ovh/releases) 选择已公开的正式版本，按平台下载二进制，并用同页的 `checksums.txt` 核对 SHA-256。容器镜像使用该发布页列出的 `ghcr.io/luodaoyi/ovh` 版本标签或 digest。不要把旧上游产物当成本仓发布。
 
 ## 订单付款与停止抢购
 
@@ -94,7 +94,7 @@ OVH 独立服务器 / VPS / Eco 系列**抢购 + 监控 + 管理**控制台。
 
 ### 方式 A：Docker
 
-当前 `docker-compose.yml` 仍来自原项目并引用旧上游镜像。本仓尚未发布可替换镜像，请勿用它直接安装或更新运行中的实例。
+本仓 `docker-compose.yml` 默认使用自己的版本镜像。升级时先按发布说明设置 `OVH_IMAGE`，备份数据和配套加密密钥、核对挂载及自动下单状态后，再运行 `docker compose pull && docker compose up -d`。不要直接覆盖已有实例的配置。
 
 **数据全在 `/data` 这一个目录下**:SQLite 数据库、**数据库加密密钥**(`.env`)、缓存、日志。备份就备份这个目录。
 

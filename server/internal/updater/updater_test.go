@@ -176,10 +176,10 @@ func TestPrepareRejectsReadOnlyDir(t *testing.T) {
 }
 
 func TestAssetNameMatchesBuildScript(t *testing.T) {
-	// build.sh 产出的名字形如 ovh-server-linux-amd64 / ovh-server-windows-amd64.exe
+	// 发布工作流产出的名字形如 ovh-server-linux-amd64 / ovh-server-windows-amd64.exe
 	n := AssetName()
 	if !strings.HasPrefix(n, "ovh-server-") {
-		t.Errorf("产物名前缀必须与 build.sh 一致: %s", n)
+		t.Errorf("产物名前缀必须与发布工作流一致: %s", n)
 	}
 }
 

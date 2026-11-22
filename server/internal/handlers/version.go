@@ -14,7 +14,7 @@ import (
 	"github.com/ovh-buy/server/internal/updater"
 )
 
-// Version 当前二进制版本。build.sh 用 -ldflags "-X github.com/ovh-buy/server/internal/handlers.Version=x.y.z" 注入。
+// Version 当前二进制版本。发布工作流用 -ldflags "-X github.com/ovh-buy/server/internal/handlers.Version=x.y.z" 注入。
 // 默认 "dev" 给 go run / 未注入的 build。
 var Version = "dev"
 
@@ -80,7 +80,7 @@ func semverGreater(latest, current string) bool {
 }
 
 // CheckUpdate GET /api/version/check-update
-// 收到请求 → 直连 GitHub 拉 gokele/ovh 最新 release,跟本地 Version 比一下。
+// 收到请求 → 直连维护仓库的 GitHub API 查最新正式版,跟本地 Version 比一下。
 // 后端不缓存、不定时跑、不存任何状态,纯粹被动响应:每次访问触发一次拉取。
 // 频率控制全交给前端 React Query 的 staleTime(同一会话 1h 内不重复请求)。
 // dev 版本(未注入 ldflags)也返回 latest 信息,但 hasUpdate 始终 false,避免开发时刷屏。
@@ -132,7 +132,7 @@ func CheckUpdate(state *app.State) gin.HandlerFunc {
 		}
 
 		latest := strings.TrimPrefix(rel.TagName, "v")
-		hasUpdate := Version != "dev" && semverGreater(latest, Version)
+		hasUpdate := !rel.Draft && !rel.Prerelease && Version != "dev" && semverGreater(latest, Version)
 
 		c.JSON(http.StatusOK, gin.H{
 			"current":     Version,

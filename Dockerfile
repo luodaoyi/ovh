@@ -27,7 +27,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---- 3. 构建后端 ----
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS gobuild
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS gobuild
 WORKDIR /app/server
 # 依赖单独一层：go.mod/go.sum 没变就命中缓存
 COPY server/go.mod server/go.sum ./
@@ -41,7 +41,7 @@ ARG TARGETOS
 ARG TARGETARCH
 # CGO_ENABLED=0：纯 Go SQLite，静态链接，交叉编译不需要 gcc
 # -tags ui：触发 //go:embed，把前端打进二进制
-# 版本号注入的路径必须和 build.sh 一致，否则自更新会拿 "dev" 去比较版本
+# 版本号注入的路径必须和发布工作流一致，否则自更新会拿 "dev" 去比较版本
 RUN VERSION="$(cat /app/VERSION)" && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -tags ui -trimpath \

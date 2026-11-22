@@ -1,10 +1,53 @@
 package updater
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestReleaseSourceDefaultsToMaintainedRepository(t *testing.T) {
+	t.Setenv("OVH_UPDATE_API", "")
+	if got := LatestReleaseURL(); got != "https://api.github.com/repos/luodaoyi/ovh/releases/latest" {
+		t.Fatalf("unexpected default release source: %s", got)
+	}
+}
+
+func TestFetchLatestOnlyAcceptsStableRelease(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		release Release
+		accept  bool
+	}{
+		{"stable", Release{TagName: "v0.4.38"}, true},
+		{"draft", Release{TagName: "v0.4.39", Draft: true}, false},
+		{"prerelease", Release{TagName: "v0.4.40-rc.1", Prerelease: true}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("unexpected release method: %s", r.Method)
+				}
+				if err := json.NewEncoder(w).Encode(test.release); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer srv.Close()
+			t.Setenv("OVH_UPDATE_API", srv.URL)
+			release, err := FetchLatest()
+			if test.accept {
+				if err != nil || release == nil || release.TagName != test.release.TagName {
+					t.Fatalf("stable release rejected: %+v, %v", release, err)
+				}
+			} else if err == nil || release != nil {
+				t.Fatalf("non-public-stable release accepted: %+v, %v", release, err)
+			}
+		})
+	}
+}
 
 func TestFetchLatestRejectsMalformedURL(t *testing.T) {
 	t.Setenv("OVH_UPDATE_API", "http://[invalid")

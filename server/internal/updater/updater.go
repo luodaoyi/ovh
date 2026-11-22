@@ -7,7 +7,7 @@
 //
 //  1. **必须校验 SHA256**。更新是"拿一个远程文件覆盖掉本机正在跑的程序",
 //     没有校验就等于给任何能中间人的网络一把远程代码执行的钥匙。
-//     校验值来自 Release 里的 checksums.txt(build.sh 发版时一起上传)。
+//     校验值来自 Release 里的 checksums.txt(发布工作流发版时一起上传)。
 //     没有这个文件就直接拒绝更新,不给"要不要冒险"的选项 —— 那种选项迟早会被点。
 //
 //  2. **临时文件必须和目标二进制同目录**。os.Rename 跨文件系统会失败,
@@ -37,11 +37,11 @@ import (
 )
 
 const (
-	// Repo 上游仓库,与 handlers 里的检查逻辑保持一致
-	Repo = "gokele/ovh"
+	// Repo 维护仓库,与 handlers 里的检查逻辑保持一致
+	Repo = "luodaoyi/ovh"
 	// UserAgent GitHub API 要求带 UA
 	UserAgent = "OVH-Console-Updater"
-	// ChecksumAsset 校验和文件名(build.sh 发版时生成并上传)
+	// ChecksumAsset 校验和文件名(发布工作流生成并上传)
 	ChecksumAsset = "checksums.txt"
 	// 下载 200MB 上限,防止被喂一个超大文件撑爆磁盘
 	maxAssetBytes = 200 << 20
@@ -49,11 +49,12 @@ const (
 
 // Release GitHub Release 里我们用得上的字段
 type Release struct {
-	TagName string  `json:"tag_name"`
-	Name    string  `json:"name"`
-	HTMLURL string  `json:"html_url"`
-	Draft   bool    `json:"draft"`
-	Assets  []Asset `json:"assets"`
+	TagName    string  `json:"tag_name"`
+	Name       string  `json:"name"`
+	HTMLURL    string  `json:"html_url"`
+	Draft      bool    `json:"draft"`
+	Prerelease bool    `json:"prerelease"`
+	Assets     []Asset `json:"assets"`
 }
 
 // Asset Release 附件
@@ -63,7 +64,7 @@ type Asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-// AssetName 当前平台对应的产物名,与 build.sh 的命名一致
+// AssetName 当前平台对应的产物名,与发布工作流的命名一致
 func AssetName() string {
 	name := fmt.Sprintf("ovh-server-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
@@ -111,8 +112,11 @@ func FetchLatest() (*Release, error) {
 		return nil, fmt.Errorf("GitHub 返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var rel Release
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&rel); err != nil {
 		return nil, fmt.Errorf("解析 Release 失败: %w", err)
+	}
+	if rel.Draft || rel.Prerelease {
+		return nil, fmt.Errorf("更新源未返回正式发布版")
 	}
 	return &rel, nil
 }

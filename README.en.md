@@ -14,7 +14,7 @@ Performance: [prebuilt carts, connection warming and dispatch measurements](docs
 
 ## Download
 
-This fork does not yet provide verified binaries or container images. Future fork builds will be announced in [luodaoyi/ovh Releases](https://github.com/luodaoyi/ovh/releases) with version-specific instructions. Do not treat upstream artifacts as fork releases or use the old update path to migrate an existing installation.
+Choose a published stable version in [luodaoyi/ovh Releases](https://github.com/luodaoyi/ovh/releases), download the matching binary and verify its SHA-256 against `checksums.txt` on the release page. For containers, use the version tag or digest for `ghcr.io/luodaoyi/ovh` documented there. Upstream artifacts are not fork releases.
 
 ## Order payment and stopping purchases
 
@@ -92,7 +92,7 @@ See [server/README.md](server/README.md) for detailed backend documentation.
 
 ### Option A: Docker
 
-The inherited `docker-compose.yml` still points to the original upstream image. This fork has not published a replacement image. Do not use that file to install or update a running instance.
+The fork's `docker-compose.yml` uses its own versioned image by default. To upgrade, set `OVH_IMAGE` according to the release notes, back up the data and corresponding encryption key, and confirm mounts and automatic ordering state before running `docker compose pull && docker compose up -d`. Do not overwrite an existing installation's configuration.
 
 **All data lives under the single `/data` directory**: the SQLite database, the **database encryption key** (`.env`), caches, and logs. Back up that directory and you have everything.
 
