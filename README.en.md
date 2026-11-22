@@ -2,6 +2,8 @@
 
 > 🌐 English | [中文](README.md)
 
+> This repository is a community-maintained fork of [gokele/ovh](https://github.com/gokele/ovh), not an official OVHcloud project. The original repository is archived. We retain its author history and [AGPL-3.0 license](LICENSE). See the [maintenance notes](docs/MAINTENANCE.md).
+
 A **sniping + monitoring + management** console for OVH bare-metal servers / VPS / Eco lines.
 
 Watches stock across OVH datacenters in real time and auto-orders purchasable servers per your configuration (datacenter, RAM, storage, bandwidth, vRack). It also manages the full lifecycle of purchased servers (reboot / reinstall / IPMI / BIOS / netboot mode / maintenance tickets / contact changes / bandwidth / firewall / FTP backup / vRack / secondary DNS, and more). Multiple OVH accounts are supported at once, with sniping and monitoring isolated per account.
@@ -12,21 +14,7 @@ Performance: [prebuilt carts, connection warming and dispatch measurements](docs
 
 ## Download
 
-Grab the binary for your platform from [Releases](https://github.com/gokele/ovh/releases), extract and run — **no Go, Node, or SQLite required**:
-
-| Platform | File |
-|---|---|
-| Windows x64 | `ovh-server-windows-amd64.exe` |
-| Linux x64 | `ovh-server-linux-amd64` |
-| Linux ARM64 (Raspberry Pi / ARM cloud hosts) | `ovh-server-linux-arm64` |
-
-The frontend is embedded into the binary via `//go:embed`; once running, open `http://localhost:19998` for the full UI. Remember `chmod +x` on Linux. To build it yourself see [Deployment](#deployment).
-
-A Docker image is also provided (`linux/amd64` + `linux/arm64`):
-
-```bash
-docker pull ghcr.io/gokele/ovh:latest
-```
+This fork does not yet provide verified binaries or container images. Future fork builds will be announced in [luodaoyi/ovh Releases](https://github.com/luodaoyi/ovh/releases) with version-specific instructions. Do not treat upstream artifacts as fork releases or use the old update path to migrate an existing installation.
 
 ## Order payment and stopping purchases
 
@@ -102,28 +90,9 @@ See [server/README.md](server/README.md) for detailed backend documentation.
 
 ## Deployment
 
-### Option A: Docker (recommended)
+### Option A: Docker
 
-```bash
-# Grab a docker-compose.yml, change the API_SECRET_KEY inside, then:
-docker compose up -d
-
-# Updating
-docker compose pull && docker compose up -d
-```
-
-Or run directly:
-
-```bash
-docker run -d --name ovh-console \
-  -p 127.0.0.1:20000:20000 \
-  -v "$PWD/data:/data" \
-  -e API_SECRET_KEY=your-own-random-string \
-  --restart unless-stopped \
-  ghcr.io/gokele/ovh:latest
-```
-
-The image is built by a GitHub Action on tag push and published to `ghcr.io/gokele/ovh`, for `linux/amd64` and `linux/arm64`.
+The inherited `docker-compose.yml` still points to the original upstream image. This fork has not published a replacement image. Do not use that file to install or update a running instance.
 
 **All data lives under the single `/data` directory**: the SQLite database, the **database encryption key** (`.env`), caches, and logs. Back up that directory and you have everything.
 
