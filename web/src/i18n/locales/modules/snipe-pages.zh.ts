@@ -420,6 +420,8 @@ export const snipePagesZh = {
     clear: "清空",
     searchPlaceholder: "搜索型号 / 机房 / 订单号...",
     allStatuses: "所有状态",
+    allModels: "所有型号",
+    allDcs: "所有机房",
     success: "成功",
     failed: "失败",
     uncertain: "待核对",
@@ -431,6 +433,8 @@ export const snipePagesZh = {
     emptyNoneDesc: "抢到的订单、失败原因和待核对的结账都会记在这里。",
     clearFilters: "清除筛选",
     filterStatus: "筛选状态",
+    filterModel: "筛选型号",
+    filterDc: "筛选机房",
     sort: {
       modelAsc: "型号：正序",
       modelDesc: "型号：倒序",

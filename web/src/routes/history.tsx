@@ -6,7 +6,7 @@ import { describeOptionCodes } from "@/lib/option-groups";
 import { OrderDurationLabel } from "@/components/queue/OrderDurationField";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { createFileRoute } from "@tanstack/react-router";
-import { Clock, RefreshCw, Trash2, AlertCircle, Hourglass, Copy, RotateCw, ArrowUp, ArrowDown, ArrowUpDown, Filter } from "lucide-react";
+import { Clock, RefreshCw, Trash2, AlertCircle, Hourglass, Copy, RotateCw, ArrowUp, ArrowDown, ArrowUpDown, Filter, Check } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -14,7 +14,6 @@ import type { TFunction } from "i18next";
 import { fmtDateTime } from "@/i18n/format";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ListToolbar, SearchBox } from "@/components/common/ListToolbar";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { useContainerWide } from "@/hooks/use-container-wide";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -95,18 +94,55 @@ function historyStatusRank(key: string): number {
   return rank < 0 ? HISTORY_STATUS_ORDER.length : rank;
 }
 
-export function getAvailableStatusOptions(items: PurchaseHistory[], activeFilter: string) {
+export function toggleHistoryFilterValue(current: string[], value: string): string[] {
+  return current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
+}
+
+export function normalizeHistoryDc(dc?: string): string {
+  return (dc || "").trim().toUpperCase();
+}
+
+export function normalizeHistoryModel(planCode?: string): string {
+  return (planCode || "").trim();
+}
+
+export function getAvailableStatusOptions(items: PurchaseHistory[], selected: string[]) {
   const counts = new Map<string, number>();
   for (const item of items) {
     const key = historyStatusKey(item);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  if (activeFilter !== "all" && !counts.has(activeFilter)) counts.set(activeFilter, 0);
-  return [
-    { value: "all", labelKey: "history.allStatuses", count: items.length },
-    ...[...counts].sort(([a], [b]) => historyStatusRank(a) - historyStatusRank(b))
-      .map(([key, count]) => ({ value: key, labelKey: key, count })),
-  ];
+  for (const value of selected) if (!counts.has(value)) counts.set(value, 0);
+  return [...counts].sort(([a], [b]) => historyStatusRank(a) - historyStatusRank(b))
+    .map(([key, count]) => ({ value: key, labelKey: key, count }));
+}
+
+export function getAvailableModelOptions(items: PurchaseHistory[], selected: string[]) {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const value = normalizeHistoryModel(item.planCode);
+    if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  for (const model of selected) {
+    const value = normalizeHistoryModel(model);
+    if (value && !counts.has(value)) counts.set(value, 0);
+  }
+  return [...counts].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+    .map(([value, count]) => ({ value, label: value, count }));
+}
+
+export function getAvailableDcOptions(items: PurchaseHistory[], selected: string[]) {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const value = normalizeHistoryDc(item.datacenter);
+    if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  for (const dc of selected) {
+    const value = normalizeHistoryDc(dc);
+    if (value && !counts.has(value)) counts.set(value, 0);
+  }
+  return [...counts].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+    .map(([value, count]) => ({ value, label: value, count }));
 }
 
 function parseTimeMs(value?: string): number | null {
@@ -122,11 +158,15 @@ function compareTimestamps(aMs: number | null, bMs: number | null, dir: "asc" | 
 
 export function filterAndSortHistory(
   items: PurchaseHistory[],
-  { search, statusFilter, sort }: { search: string; statusFilter: string; sort: HistorySort },
+  { search, statusFilter, modelFilter = [], dcFilter = [], sort }: {
+    search: string; statusFilter: string[]; modelFilter?: string[]; dcFilter?: string[]; sort: HistorySort;
+  },
 ): PurchaseHistory[] {
   const query = search.trim().toLowerCase();
   return items.filter((item) => {
-    if (statusFilter !== "all" && historyStatusKey(item) !== statusFilter) return false;
+    if (statusFilter.length > 0 && !statusFilter.includes(historyStatusKey(item))) return false;
+    if (modelFilter.length > 0 && !modelFilter.includes(normalizeHistoryModel(item.planCode))) return false;
+    if (dcFilter.length > 0 && !dcFilter.includes(normalizeHistoryDc(item.datacenter))) return false;
     return !query || `${item.planCode} ${item.datacenter} ${item.orderId || ""}`.toLowerCase().includes(query);
   }).sort((a, b) => {
     const aMs = parseTimeMs(a.purchaseTime);
@@ -141,14 +181,78 @@ export function filterAndSortHistory(
     }
     const byField = sort.startsWith("status")
       ? historyStatusRank(historyStatusKey(a)) - historyStatusRank(historyStatusKey(b))
-      : (sort.startsWith("model") ? a.planCode : a.datacenter)
-        .localeCompare(sort.startsWith("model") ? b.planCode : b.datacenter, undefined, { numeric: true, sensitivity: "base" });
+      : (sort.startsWith("model") ? normalizeHistoryModel(a.planCode) : normalizeHistoryDc(a.datacenter))
+        .localeCompare(sort.startsWith("model") ? normalizeHistoryModel(b.planCode) : normalizeHistoryDc(b.datacenter), undefined, { numeric: true, sensitivity: "base" });
     return (dir === "asc" ? byField : -byField) || newestFirst;
   });
 }
 
 function historyStatusKey(item: PurchaseHistory): string {
   return item.status === "success" ? orderStatusView(item).labelKey : `history.${item.status}`;
+}
+
+function ColumnMultiFilter({ label, allLabel, totalCount, options, selected, onToggle, onClear }: {
+  label: string;
+  allLabel: string;
+  totalCount: number;
+  options: { value: string; label: string; count: number }[];
+  selected: string[];
+  onToggle: (value: string) => void;
+  onClear: () => void;
+}) {
+  const selectedLabels = selected.map((value) => options.find((option) => option.value === value)?.label ?? value);
+  const singleLabel = selectedLabels[0];
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-[11px] leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected.length > 0 ? "text-primary" : "hover:text-foreground"}`}
+          aria-label={label}
+          title={selected.length > 0 ? selectedLabels.join(", ") : label}
+        >
+          <Filter className="h-3 w-3 shrink-0" aria-hidden />
+          {selected.length === 1 && <span className="max-w-[7rem] truncate normal-case">{singleLabel}</span>}
+          {selected.length >= 2 && <span className="tabular-nums normal-case">{selected.length}</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-1.5" align="start">
+        <button
+          type="button"
+          aria-pressed={selected.length === 0}
+          onClick={onClear}
+          className={`flex w-full items-center gap-2 rounded-sm px-2 py-2 sm:py-1.5 text-sm sm:text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected.length === 0 ? "bg-accent text-primary" : ""}`}
+        >
+          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border ${selected.length === 0 ? "border-primary bg-primary text-primary-foreground" : "border-input"}`} aria-hidden>
+            {selected.length === 0 && <Check className="h-3 w-3" />}
+          </span>
+          <span className="flex-1 text-left">{allLabel}</span>
+          <span className="tabular-nums text-muted-foreground">{totalCount}</span>
+        </button>
+        <div className="my-1 h-px bg-border" />
+        <div className="max-h-64 overflow-y-auto">
+          {options.map((option) => {
+            const checked = selected.includes(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={checked}
+                onClick={() => onToggle(option.value)}
+                className={`flex w-full items-center gap-2 rounded-sm px-2 py-2 sm:py-1.5 text-sm sm:text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? "bg-accent text-primary" : ""}`}
+              >
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input"}`} aria-hidden>
+                  {checked && <Check className="h-3 w-3" />}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
+                <span className="tabular-nums text-muted-foreground">{option.count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 /** 抢购历史：表格 + 搜索 + 状态过滤 */
@@ -224,7 +328,9 @@ function HistoryPage() {
       },
     });
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [modelFilter, setModelFilter] = useState<string[]>([]);
+  const [dcFilter, setDcFilter] = useState<string[]>([]);
   const [sort, setSort] = useState<HistorySort>("timeDesc");
   const [confirmClear, setConfirmClear] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -236,9 +342,10 @@ function HistoryPage() {
   }, []);
 
   const items = list.data || [];
-  const filtered = useMemo(() => filterAndSortHistory(items, { search, statusFilter, sort }), [items, search, statusFilter, sort]);
+  const filtered = useMemo(() => filterAndSortHistory(items, { search, statusFilter, modelFilter, dcFilter, sort }), [items, search, statusFilter, modelFilter, dcFilter, sort]);
   const statusOptions = useMemo(() => getAvailableStatusOptions(items, statusFilter), [items, statusFilter]);
-  const activeStatusOption = statusOptions.find((option) => option.value === statusFilter);
+  const modelOptions = useMemo(() => getAvailableModelOptions(items, modelFilter), [items, modelFilter]);
+  const dcOptions = useMemo(() => getAvailableDcOptions(items, dcFilter), [items, dcFilter]);
   const [tableRef, wide] = useContainerWide(HISTORY_TABLE_MIN_WIDTH);
   const sortHeader = (field: HistorySortField, label: string) => {
     const active = sort.startsWith(field);
@@ -263,25 +370,34 @@ function HistoryPage() {
   const statusHeader = (
     <div className="inline-flex items-center gap-1">
       {sortHeader("status", t("history.col.status"))}
-      <Select value={statusFilter} onValueChange={setStatusFilter}>
-        <SelectTrigger
-          className={`h-auto sm:h-auto min-h-0 w-auto gap-1 border-0 bg-transparent px-1 py-0.5 text-[11px] sm:text-[11px] leading-none shadow-none [&>svg:last-child]:hidden ${statusFilter !== "all" ? "text-primary" : ""}`}
-          aria-label={t("history.filterStatus")}
-          title={t(activeStatusOption?.labelKey ?? "history.allStatuses")}
-        >
-          <Filter className="h-3 w-3" aria-hidden />
-          {statusFilter !== "all" && (
-            <span className="text-[11px] normal-case">{t(activeStatusOption?.labelKey ?? "history.allStatuses")}</span>
-          )}
-        </SelectTrigger>
-        <SelectContent>
-          {statusOptions.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {t(option.labelKey)} ({option.count})
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <ColumnMultiFilter
+        label={t("history.filterStatus")} allLabel={t("history.allStatuses")} totalCount={items.length}
+        options={statusOptions.map((option) => ({ ...option, label: t(option.labelKey) }))} selected={statusFilter}
+        onToggle={(value) => setStatusFilter((current) => toggleHistoryFilterValue(current, value))}
+        onClear={() => setStatusFilter([])}
+      />
+    </div>
+  );
+  const modelHeader = (
+    <div className="inline-flex items-center gap-1">
+      {sortHeader("model", t("history.col.model"))}
+      <ColumnMultiFilter
+        label={t("history.filterModel")} allLabel={t("history.allModels")} totalCount={items.length}
+        options={modelOptions} selected={modelFilter}
+        onToggle={(value) => setModelFilter((current) => toggleHistoryFilterValue(current, value))}
+        onClear={() => setModelFilter([])}
+      />
+    </div>
+  );
+  const dcHeader = (
+    <div className="inline-flex items-center gap-1">
+      {sortHeader("dc", t("history.col.dc"))}
+      <ColumnMultiFilter
+        label={t("history.filterDc")} allLabel={t("history.allDcs")} totalCount={items.length}
+        options={dcOptions} selected={dcFilter}
+        onToggle={(value) => setDcFilter((current) => toggleHistoryFilterValue(current, value))}
+        onClear={() => setDcFilter([])}
+      />
     </div>
   );
   const emptyResults = (
@@ -289,7 +405,7 @@ function HistoryPage() {
       illustration="search"
       title={t("history.emptyTitle")}
       action={
-        <Button variant="outline" onClick={() => { setSearch(""); setStatusFilter("all"); }}>
+        <Button variant="outline" onClick={() => { setSearch(""); setStatusFilter([]); setModelFilter([]); setDcFilter([]); }}>
           {t("history.clearFilters")}
         </Button>
       }
@@ -369,8 +485,8 @@ function HistoryPage() {
               <table className="w-full">
                 <thead>
                   <tr className="text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wide border-b border-border whitespace-nowrap">
-                    <th className="pl-4 pr-3 py-2.5" aria-sort={sortAria("model")}>{sortHeader("model", t("history.col.model"))}</th>
-                    <th className="px-3 py-2.5" aria-sort={sortAria("dc")}>{sortHeader("dc", t("history.col.dc"))}</th>
+                    <th className="pl-4 pr-3 py-2.5" aria-sort={sortAria("model")}>{modelHeader}</th>
+                    <th className="px-3 py-2.5" aria-sort={sortAria("dc")}>{dcHeader}</th>
                     <th className="px-3 py-2.5">{t("history.col.options")}</th>
                     <th className="px-3 py-2.5 text-right" aria-sort={sortAria("price")}>{sortHeader("price", t("history.col.price"))}</th>
                     <th className="px-3 py-2.5" aria-sort={sortAria("status")}>{statusHeader}</th>
@@ -388,8 +504,8 @@ function HistoryPage() {
             ) : (
               <div className="divide-y divide-border">
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1 bg-muted/40 px-4 py-2 text-[11px] font-medium text-muted-foreground">
-                  {sortHeader("model", t("history.col.model"))}
-                  {sortHeader("dc", t("history.col.dc"))}
+                  {modelHeader}
+                  {dcHeader}
                   {sortHeader("price", t("history.col.price"))}
                   {statusHeader}
                   {sortHeader("time", t("history.col.time"))}

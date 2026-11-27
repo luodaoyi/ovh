@@ -420,6 +420,8 @@ export const snipePagesEn = {
     clear: "Clear",
     searchPlaceholder: "Search model / DC / order ID...",
     allStatuses: "All statuses",
+    allModels: "All models",
+    allDcs: "All DCs",
     success: "Success",
     failed: "Failed",
     uncertain: "Needs verification",
@@ -431,6 +433,8 @@ export const snipePagesEn = {
     emptyNoneDesc: "Won orders, failure reasons and checkouts awaiting review will appear here.",
     clearFilters: "Clear filters",
     filterStatus: "Filter status",
+    filterModel: "Filter model",
+    filterDc: "Filter DC",
     sort: {
       modelAsc: "Model: ascending",
       modelDesc: "Model: descending",
