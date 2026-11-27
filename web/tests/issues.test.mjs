@@ -1036,3 +1036,175 @@ test("presale preparation timing phases are translated in tooltips", async () =>
     }
   } finally { await i18n.changeLanguage(original); }
 });
+
+
+const historyItem = (overrides = {}) => ({
+  id: "order", accountId: "eu", planCode: "plan2", datacenter: "dc2", status: "success",
+  orderId: "123", orderStatus: "notPaid", purchaseTime: "2026-11-01T00:00:00Z", ...overrides,
+});
+
+test("history sort headers toggle active fields and default time to newest first", async () => {
+  const { nextHistorySort } = await server.ssrLoadModule("/src/routes/history.tsx");
+  for (const field of ["model", "dc", "price", "status", "time", "remaining"]) {
+    assert.equal(nextHistorySort(field + "Asc", field), field + "Desc");
+    assert.equal(nextHistorySort(field + "Desc", field), field + "Asc");
+    assert.equal(nextHistorySort(field === "time" ? "modelAsc" : "timeDesc", field), field + (field === "time" ? "Desc" : "Asc"));
+  }
+});
+
+test("history status options count actual business statuses and retain only the active empty filter", async () => {
+  const { getAvailableStatusOptions } = await server.ssrLoadModule("/src/routes/history.tsx");
+  const items = [historyItem(), historyItem(), historyItem({ orderStatus: "documentsRequested" }),
+    historyItem({ status: "failed" }), historyItem({ status: "uncertain" }), historyItem({ orderStatus: "new-status" })];
+  const expected = [
+    { value: "all", labelKey: "history.allStatuses", count: 6 },
+    ...[["history.st.notPaid.label", 2], ["history.st.documentsRequested.label", 1], ["history.uncertain", 1],
+      ["history.failed", 1], ["history.st.notFound.label", 1]].map(([key, count]) => ({ value: key, labelKey: key, count })),
+  ];
+  assert.deepEqual(getAvailableStatusOptions(items, "all"), expected);
+  const active = "history.st.delivered.label";
+  const retained = getAvailableStatusOptions(items, active);
+  assert.deepEqual(retained[3], { value: active, labelKey: active, count: 0 });
+  assert.deepEqual(retained.filter(option => option.count > 0), expected);
+  assert.deepEqual(getAvailableStatusOptions([], "all"), [{ value: "all", labelKey: "history.allStatuses", count: 0 }]);
+  assert.deepEqual(getAvailableStatusOptions([], "history.extra"), [
+    { value: "all", labelKey: "history.allStatuses", count: 0 },
+    { value: "history.extra", labelKey: "history.extra", count: 0 },
+  ]);
+  assert.equal(getAvailableStatusOptions([...items, historyItem({ status: "extra" })], "all").at(-1).value, "history.extra");
+});
+
+test("history sorts all six fields in both directions without mutating input", async () => {
+  const { filterAndSortHistory } = await server.ssrLoadModule("/src/routes/history.tsx");
+  const a = historyItem({ id: "a", price: { withTax: 0 }, expirationTime: "2026-12-01T00:00:00Z" });
+  const b = historyItem({ id: "b", planCode: "PLAN10", datacenter: "DC10", price: { withTax: 10 }, orderStatus: "documentsRequested", purchaseTime: "2026-11-02T00:00:00Z", expirationTime: "2026-12-02T00:00:00Z" });
+  const c = historyItem({ id: "c", planCode: "plan20", datacenter: "dc20", price: { withTax: 20 }, orderStatus: "unknown", purchaseTime: "2026-11-03T00:00:00Z", expirationTime: "2026-12-03T00:00:00Z" });
+  const items = Object.freeze([c, a, b].map(Object.freeze));
+  for (const field of ["model", "dc", "price", "status", "time", "remaining"]) {
+    for (const [direction, expected] of [["Asc", ["a", "b", "c"]], ["Desc", ["c", "b", "a"]]]) {
+      assert.deepEqual(filterAndSortHistory(items, { search: "", statusFilter: "all", sort: field + direction }).map(item => item.id), expected, field + direction);
+    }
+  }
+  assert.deepEqual(items.map(item => item.id), ["c", "a", "b"]);
+});
+
+test("history search and status filters use business keys without aggregate success", async () => {
+  const { filterAndSortHistory } = await server.ssrLoadModule("/src/routes/history.tsx");
+  const items = [historyItem({ id: "paid", orderStatus: "delivered" }), historyItem({ id: "unpaid", planCode: "KS-10", datacenter: "GRA", orderId: "MATCH-42" }), historyItem({ id: "failed", status: "failed" })];
+  const run = (search, statusFilter) => filterAndSortHistory(items, { search, statusFilter, sort: "timeDesc" }).map(item => item.id);
+  for (const query of [" ks-10 ", "gra", "match-42"]) assert.deepEqual(run(query, "history.st.notPaid.label"), ["unpaid"]);
+  assert.deepEqual(run("", "history.failed"), ["failed"]);
+  assert.deepEqual(run("", "success"), []);
+  assert.deepEqual(run("missing", "all"), []);
+});
+
+test("history invalid or missing timestamps sort last in both directions", async () => {
+  const { filterAndSortHistory } = await server.ssrLoadModule("/src/routes/history.tsx");
+  const items = [historyItem({ id: "invalid", purchaseTime: "NaN" }), historyItem({ id: "new", purchaseTime: "2026-11-02T00:00:00Z" }),
+    historyItem({ id: "missing", purchaseTime: undefined }), historyItem({ id: "old", purchaseTime: "1970-01-01T00:00:00Z" }),
+    historyItem({ id: "empty", purchaseTime: "" }), historyItem({ id: "nonfinite", purchaseTime: "Infinity" })];
+  for (const [sort, valid] of [["timeAsc", ["old", "new"]], ["timeDesc", ["new", "old"]]]) {
+    const ids = filterAndSortHistory(items, { search: "", statusFilter: "all", sort }).map(item => item.id);
+    assert.deepEqual(ids.slice(0, 2), valid);
+    assert.deepEqual(ids.slice(2), ["invalid", "missing", "empty", "nonfinite"]);
+  }
+});
+
+test("history missing prices stay last while zero remains a real price", async () => {
+  const { filterAndSortHistory } = await server.ssrLoadModule("/src/routes/history.tsx");
+  const items = [historyItem({ id: "missing" }), historyItem({ id: "ten", price: { withTax: 10 } }),
+    historyItem({ id: "nan", price: { withTax: NaN } }), historyItem({ id: "zero", price: { withTax: 0 } })];
+  for (const [sort, valid] of [["priceAsc", ["zero", "ten"]], ["priceDesc", ["ten", "zero"]]]) {
+    assert.deepEqual(filterAndSortHistory(items, { search: "", statusFilter: "all", sort }).map(item => item.id), [...valid, "missing", "nan"]);
+  }
+});
+
+test("history remaining time sorts only countdown rows and safely derives missing expiry", async () => {
+  const { filterAndSortHistory } = await server.ssrLoadModule("/src/routes/history.tsx");
+  const excluded = [
+    { status: "failed" }, { status: "uncertain" }, { orderId: undefined }, { orderId: "" },
+    ...["checking", "delivering", "delivered", "cancelling", "cancelled"].map(orderStatus => ({ orderStatus })),
+    { purchaseTime: "NaN", expirationTime: "NaN" },
+  ].map((overrides, i) => historyItem({ id: "excluded" + i, expirationTime: "2020-01-01T00:00:00Z", ...overrides }));
+  const countdowns = [
+    historyItem({ id: "explicit", purchaseTime: "NaN", expirationTime: "2026-11-10T00:00:00Z" }),
+    historyItem({ id: "derived", expirationTime: "NaN" }),
+    historyItem({ id: "missingExpiry", purchaseTime: "2026-11-02T00:00:00Z" }),
+  ];
+  for (const [sort, expected] of [["remainingAsc", ["explicit", "derived", "missingExpiry"]], ["remainingDesc", ["missingExpiry", "derived", "explicit"]]]) {
+    const rows = filterAndSortHistory([...excluded, ...countdowns], { search: "", statusFilter: "all", sort });
+    assert.deepEqual(rows.slice(0, 3).map(item => item.id), expected);
+    assert.deepEqual(new Set(rows.slice(3).map(item => item.id)), new Set(excluded.map(item => item.id)));
+  }
+});
+
+test("history status sorting follows business priority and ranks extra keys after known statuses", async () => {
+  const { filterAndSortHistory, getAvailableStatusOptions } = await server.ssrLoadModule("/src/routes/history.tsx");
+  const order = ["notPaid", "documentsRequested", "checking", "delivering", "delivered", "uncertain", "cancelling", "cancelled", "failed", "unknown", "notFound", "extra"];
+  const items = order.map(key => historyItem({ id: key, ...(["failed", "uncertain", "extra"].includes(key) ? { status: key } : { orderStatus: key }) }));
+  for (const [sort, expected] of [["statusAsc", order], ["statusDesc", [...order].reverse()]]) {
+    assert.deepEqual(filterAndSortHistory([...items].reverse(), { search: "", statusFilter: "all", sort }).map(item => item.id), expected);
+  }
+  assert.deepEqual(getAvailableStatusOptions([...items].reverse(), "all").slice(1).map(option => option.value),
+    order.map(key => ["failed", "uncertain", "extra"].includes(key) ? "history." + key : "history.st." + key + ".label"));
+});
+
+test("history non-time ties always use newest first including case-insensitive natural names", async () => {
+  const { filterAndSortHistory } = await server.ssrLoadModule("/src/routes/history.tsx");
+  const items = [historyItem({ id: "old", price: { withTax: 1 }, expirationTime: "2026-12-01T00:00:00Z" }),
+    historyItem({ id: "invalid", purchaseTime: "NaN", price: { withTax: 1 }, expirationTime: "2026-12-01T00:00:00Z" }),
+    historyItem({ id: "new", planCode: "PLAN2", datacenter: "DC2", purchaseTime: "2026-11-02T00:00:00Z", price: { withTax: 1 }, expirationTime: "2026-12-01T00:00:00Z" })];
+  for (const field of ["model", "dc", "price", "status", "remaining"]) {
+    for (const direction of ["Asc", "Desc"]) {
+      assert.deepEqual(filterAndSortHistory(items, { search: "", statusFilter: "all", sort: field + direction }).map(item => item.id), ["new", "old", "invalid"]);
+    }
+  }
+});
+
+test("history SSR exposes all six sortable desktop columns and mobile controls in both languages", async () => {
+  // SSR has no container measurement; supply a wide container only in this test server.
+  const desktop = await createServer({
+    configFile: false, root: fileURLToPath(new URL("..", import.meta.url)),
+    resolve: { alias: { "@": fileURLToPath(new URL("../src", import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false }, appType: "custom",
+    plugins: [{ name: "test-wide-container", enforce: "pre", load(id) {
+      if (id.replaceAll("\\", "/").endsWith("/src/hooks/use-container-wide.ts")) return "export function useContainerWide() { return [() => {}, true]; }";
+    } }],
+  });
+  const client = new QueryClient();
+  client.setQueryData(["history"], [historyItem({ orderId: undefined }), historyItem({ id: "invalid", purchaseTime: "NaN", expirationTime: "NaN" })]);
+  client.setQueryData(["accounts", "list"], []);
+  const { default: mobileI18n } = await server.ssrLoadModule("/src/i18n/index.ts");
+  const originalLanguage = mobileI18n.language;
+  try {
+    const { Route: DesktopRoute } = await desktop.ssrLoadModule("/src/routes/history.tsx");
+    const { Route: MobileRoute } = await server.ssrLoadModule("/src/routes/history.tsx");
+    const { default: desktopI18n } = await desktop.ssrLoadModule("/src/i18n/index.ts");
+    for (const lang of ["zh", "en"]) {
+      await desktopI18n.changeLanguage(lang);
+      await mobileI18n.changeLanguage(lang);
+      const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(DesktopRoute.options.component)));
+      const mobile = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(MobileRoute.options.component)));
+      const headers = [...html.matchAll(/<th\b[^>]*aria-sort="([^"]+)"[^>]*>([\s\S]*?)<\/th>/g)];
+      assert.equal(headers.length, 6);
+      for (const [index, field] of ["model", "dc", "price", "status", "time", "remaining"].entries()) {
+        assert.equal(headers[index][1], field === "time" ? "descending" : "none");
+        const label = desktopI18n.t("history.sort." + field + "Asc");
+        assert.ok(headers[index][2].includes('aria-label="' + label + '"'), field);
+        assert.ok(mobile.includes('aria-label="' + mobileI18n.t("history.sort." + field + "Asc") + '"'), field);
+        assert.ok(headers[index][2].includes(desktopI18n.t("history.sort.clickToSort", { next: label })), field);
+      }
+      assert.ok(headers[2][2].includes(desktopI18n.t("history.sort.priceHint")));
+      assert.ok(headers[5][2].includes(desktopI18n.t("history.col.remainingTitle")));
+      assert.doesNotMatch(html + mobile, /NaN|history\.sort\./);
+      assert.doesNotMatch(mobile, /<thead/);
+    }
+  } finally { await mobileI18n.changeLanguage(originalLanguage); client.clear(); await desktop.close(); }
+});
+
+test("list toolbar omits its left wrapper when children are absent", async () => {
+  const { ListToolbar } = await server.ssrLoadModule("/src/components/common/ListToolbar.tsx");
+  const render = children => renderToStaticMarkup(createElement(ListToolbar, { end: createElement("input") }, children));
+  assert.doesNotMatch(render(undefined), /min-w-0 flex flex-wrap items-center gap-2/);
+  assert.match(render(createElement("span", null, "filter")), /min-w-0 flex flex-wrap items-center gap-2/);
+});
